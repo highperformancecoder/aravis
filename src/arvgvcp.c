@@ -340,7 +340,7 @@ arv_gvcp_packet_new_discovery_cmd (size_t *packet_size)
 	packet = g_malloc (*packet_size);
 
 	packet->header.packet_type = ARV_GVCP_PACKET_TYPE_CMD;
-	packet->header.packet_flags = 0;
+	packet->header.packet_flags = 1; /* Acknowledge required */
 	packet->header.command = g_htons (ARV_GVCP_COMMAND_DISCOVERY_CMD);
 	packet->header.size = g_htons (0x0000);
 	packet->header.id = g_htons (0xffff);
