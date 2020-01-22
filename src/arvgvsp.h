@@ -118,6 +118,8 @@ typedef struct {
  * @height: frame height, in pixels
  * @x_offset: frame x offset, in pixels
  * @y_offset: frame y offset, in pixels
+ * @x_padding: frame x padding, in pixels
+ * @y_padding: frame y padding, in pixels
  *
  * GVSP data leader packet data area.
  */
@@ -132,6 +134,8 @@ typedef struct {
 	guint32 height;
 	guint32	x_offset;
 	guint32	y_offset;
+        guint16 x_padding;
+        guint16 y_padding;
 } ArvGvspDataLeader;
 
 /**

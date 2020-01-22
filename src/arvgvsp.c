@@ -84,6 +84,8 @@ arv_gvsp_packet_new_data_leader	(guint16 frame_id, guint32 packet_id,
 		leader->height = g_htonl (height);
 		leader->x_offset = g_htonl (x_offset);
 		leader->y_offset = g_htonl (y_offset);
+                leader->x_padding = 0;
+                leader->y_padding = 0;
 	}
 
 	return packet;
