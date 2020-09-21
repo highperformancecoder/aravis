@@ -34,14 +34,14 @@
 #include <arvversion.h>
 #include <arvgc.h>
 #include <arvgcregisternode.h>
-#include <arvgvcp.h>
+#include <arvgvcpprivate.h>
 #include <arvbufferprivate.h>
 #include <arvdebug.h>
 #include <arvmisc.h>
 #include <string.h>
 #include <math.h>
 
-static const char *arv_fake_camera_genicam_filename = NULL;
+static char *arv_fake_camera_genicam_filename = NULL;
 
 /*
  * arv_set_fake_camera_genicam_filename:
@@ -54,7 +54,8 @@ static const char *arv_fake_camera_genicam_filename = NULL;
 void
 arv_set_fake_camera_genicam_filename (const char *filename)
 {
-	arv_fake_camera_genicam_filename = filename;
+	g_clear_pointer (&arv_fake_camera_genicam_filename, g_free);
+	arv_fake_camera_genicam_filename = g_strdup (filename);
 }
 
 static const char *
@@ -63,9 +64,7 @@ arv_get_fake_camera_genicam_filename (void)
 	return arv_fake_camera_genicam_filename;
 }
 
-static GObjectClass *parent_class = NULL;
-
-struct _ArvFakeCameraPrivate {
+typedef struct {
 	void *memory;
 
 	char *genicam_xml;
@@ -78,7 +77,19 @@ struct _ArvFakeCameraPrivate {
 
 	ArvFakeCameraFillPattern fill_pattern_callback;
 	void *fill_pattern_data;
+} ArvFakeCameraPrivate;
+
+struct _ArvFakeCamera {
+	GObject object;
+
+	ArvFakeCameraPrivate *priv;
 };
+
+struct _ArvFakeCameraClass {
+	GObjectClass parent_class;
+};
+
+G_DEFINE_TYPE_WITH_CODE (ArvFakeCamera, arv_fake_camera, G_TYPE_OBJECT, G_ADD_PRIVATE (ArvFakeCamera))
 
 /* ArvFakeCamera implementation */
 
@@ -101,7 +112,7 @@ arv_fake_camera_read_memory (ArvFakeCamera *camera, guint32 address, guint32 siz
 
 		size = size - read_size;
 		address = ARV_FAKE_CAMERA_MEMORY_SIZE;
-		buffer = buffer + read_size;
+		buffer = ((char *) buffer) + read_size;
 	}
 
 	address -= ARV_FAKE_CAMERA_MEMORY_SIZE;
@@ -109,7 +120,7 @@ arv_fake_camera_read_memory (ArvFakeCamera *camera, guint32 address, guint32 siz
 
 	memcpy (buffer, ((char *) camera->priv->genicam_xml) + address, read_size);
 	if (read_size < size)
-		memset (buffer + read_size, 0, size - read_size);
+		memset (((char *) buffer) + read_size, 0, size - read_size);
 
 	return TRUE;
 }
@@ -130,6 +141,15 @@ arv_fake_camera_write_memory (ArvFakeCamera *camera, guint32 address, guint32 si
 
 	return TRUE;
 }
+
+/**
+ * arv_fake_camera_read_register:
+ * @camera: a #ArvFakeCamera
+ * @address: the register address
+ * @value: (out): the register value
+ *
+ * Return value: true if the read succeeded, false otherwise
+ */
 
 gboolean
 arv_fake_camera_read_register (ArvFakeCamera *camera, guint32 address, guint32 *value)
@@ -180,6 +200,14 @@ arv_fake_camera_get_payload (ArvFakeCamera *camera)
 
 	return width * height * ARV_PIXEL_FORMAT_BIT_PER_PIXEL(pixel_format)/8;
 }
+
+/**
+ * arv_fake_camera_get_sleep_time_for_next_frame:
+ * @camera: a #ArvFakeCamera
+ * @next_timestamp_us: (out) (optional): the timestamp for the next frame in microseconds
+ *
+ * Return value: the sleep time for the next frame
+ */
 
 guint64
 arv_fake_camera_get_sleep_time_for_next_frame (ArvFakeCamera *camera, guint64 *next_timestamp_us)
@@ -513,24 +541,132 @@ arv_fake_camera_diagonal_ramp (ArvBuffer *buffer, void *fill_pattern_data,
 				}
 			break;
 
-		case ARV_PIXEL_FORMAT_RGB_8_PACKED:
-			for (y = 0; y < height; y++)
-				for (x = 0; x < width; x++) {
-					unsigned char *pixel = &buffer->priv->data [3 * (y * width + x)];
-					unsigned int index;
+        case ARV_PIXEL_FORMAT_BAYER_BG_8:
+            for (y = 0; y < height; y++)
+                for (x = 0; x < width; x++) {
+                    unsigned int index;
+		    unsigned char *pixel;
 
-					pixel_value = (x + buffer->priv->frame_id + y) % 255;
-					pixel_value *= scale;
+		    pixel_value = (x + buffer->priv->frame_id + y) % 255;
+		    pixel_value *= scale;
+		    index = CLAMP (pixel_value, 0, 255);
 
-					index = CLAMP (pixel_value, 0, 255);
+                    // BG
+                    // GR
+                    pixel = &buffer->priv->data [y * width + x];
+                    if (x & 1) {
+                        if (y & 1)
+                            *pixel = jet_colormap [index].b;
+                        else
+                            *pixel = jet_colormap [index].g;
+                    } else {
+                        if (y & 1)
+                            *pixel = jet_colormap [index].g;
+                        else
+                            *pixel = jet_colormap [index].r;
+                    }
+                }
+            break;
 
-					pixel[0] = jet_colormap [index].r;
-					pixel[1] = jet_colormap [index].g;
-					pixel[2] = jet_colormap [index].b;
-				}
+        case ARV_PIXEL_FORMAT_BAYER_GB_8:
+            for (y = 0; y < height; y++)
+                for (x = 0; x < width; x++) {
+                    unsigned int index;
+		    unsigned char *pixel;
 
-		default:
-			break;
+		    pixel_value = (x + buffer->priv->frame_id + y) % 255;
+		    pixel_value *= scale;
+		    index = CLAMP (pixel_value, 0, 255);
+
+                    // GB
+                    // RG
+                    pixel = &buffer->priv->data [y * width + x];
+                    if (x & 1) {
+                        if (y & 1)
+                            *pixel = jet_colormap [index].g;
+                        else
+                            *pixel = jet_colormap [index].b;
+                    } else {
+                        if (y & 1)
+                            *pixel = jet_colormap [index].r;
+                        else
+                            *pixel = jet_colormap [index].g;
+                    }
+                }
+            break;
+
+	case ARV_PIXEL_FORMAT_BAYER_GR_8:
+	    for (y = 0; y < height; y++)
+		    for (x = 0; x < width; x++) {
+			    unsigned int index;
+			    unsigned char *pixel;
+
+			    pixel_value = (x + buffer->priv->frame_id + y) % 255;
+			    pixel_value *= scale;
+			    index = CLAMP (pixel_value, 0, 255);
+
+			    // GR
+			    // BG
+			    pixel = &buffer->priv->data [y * width + x];
+			    if (x & 1) {
+				    if (y & 1)
+					    *pixel = jet_colormap [index].g;
+				    else
+					    *pixel = jet_colormap [index].r;
+			    } else {
+				    if (y & 1)
+					    *pixel = jet_colormap [index].b;
+				    else
+					    *pixel = jet_colormap [index].g;
+			    }
+		    }
+	    break;
+
+        case ARV_PIXEL_FORMAT_BAYER_RG_8:
+	    for (y = 0; y < height; y++)
+		    for (x = 0; x < width; x++) {
+			    unsigned int index;
+			    unsigned char *pixel;
+
+			    pixel_value = (x + buffer->priv->frame_id + y) % 255;
+			    pixel_value *= scale;
+			    index = CLAMP (pixel_value, 0, 255);
+
+			    // RG
+			    // GB
+			    pixel = &buffer->priv->data [y * width + x];
+			    if (x & 1) {
+				    if (y & 1)
+					    *pixel = jet_colormap [index].r;
+				    else
+					    *pixel = jet_colormap [index].g;
+			    } else {
+				    if (y & 1)
+					    *pixel = jet_colormap [index].g;
+				    else
+					    *pixel = jet_colormap [index].b;
+			    }
+		    }
+	    break;
+
+	case ARV_PIXEL_FORMAT_RGB_8_PACKED:
+	    for (y = 0; y < height; y++)
+		    for (x = 0; x < width; x++) {
+			    unsigned char *pixel = &buffer->priv->data [3 * (y * width + x)];
+			    unsigned int index;
+
+			    pixel_value = (x + buffer->priv->frame_id + y) % 255;
+			    pixel_value *= scale;
+
+			    index = CLAMP (pixel_value, 0, 255);
+
+			    pixel[0] = jet_colormap [index].r;
+			    pixel[1] = jet_colormap [index].g;
+			    pixel[2] = jet_colormap [index].b;
+		    }
+
+	default:
+	    break;
 	}
 }
 
@@ -563,6 +699,15 @@ arv_fake_camera_set_fill_pattern (ArvFakeCamera *camera,
 	g_mutex_unlock (&camera->priv->fill_pattern_mutex);
 }
 
+/**
+ * arv_fake_camera_fill_buffer:
+ * @camera: a #ArvFakeCamera
+ * @buffer: the #ArvBuffer to fill
+ * @packet_size: (out) (optional): the packet size
+ *
+ * Fill a buffer with data from the fake camera.
+ */
+
 void
 arv_fake_camera_fill_buffer (ArvFakeCamera *camera, ArvBuffer *buffer, guint32 *packet_size)
 {
@@ -585,6 +730,11 @@ arv_fake_camera_fill_buffer (ArvFakeCamera *camera, ArvBuffer *buffer, guint32 *
 		return;
 	}
 
+	/* frame id is a 16 bit value, 0 is invalid */
+	camera->priv->frame_id = (camera->priv->frame_id + 1) % 65536;
+	if (camera->priv->frame_id == 0)
+		camera->priv->frame_id = 1;
+
 	buffer->priv->payload_type = ARV_BUFFER_PAYLOAD_TYPE_IMAGE;
 	buffer->priv->chunk_endianness = G_BIG_ENDIAN;
 	buffer->priv->width = width;
@@ -594,7 +744,7 @@ arv_fake_camera_fill_buffer (ArvFakeCamera *camera, ArvBuffer *buffer, guint32 *
 	buffer->priv->status = ARV_BUFFER_STATUS_SUCCESS;
 	buffer->priv->timestamp_ns = g_get_real_time () * 1000;
 	buffer->priv->system_timestamp_ns = buffer->priv->timestamp_ns;
-	buffer->priv->frame_id = camera->priv->frame_id++;
+	buffer->priv->frame_id = camera->priv->frame_id;
 	buffer->priv->pixel_format = _get_register (camera, ARV_FAKE_CAMERA_REGISTER_PIXEL_FORMAT);
 
 	g_mutex_lock (&camera->priv->fill_pattern_mutex);
@@ -700,6 +850,14 @@ arv_fake_camera_get_heartbeat_timeout (ArvFakeCamera *camera)
 	return value;
 }
 
+/**
+ * arv_fake_camera_get_genicam_xml:
+ * @camera: a #ArvFakeCamera
+ * @size: (out) (optional): the size of the returned XML string
+ *
+ * Return value: (transfer none): the genicam XML description of the camera
+ */
+
 const char *
 arv_fake_camera_get_genicam_xml (ArvFakeCamera *camera, size_t *size)
 {
@@ -745,7 +903,8 @@ arv_fake_camera_new_full (const char *serial_number, const char *genicam_filenam
 		filename = g_build_filename (ARAVIS_DATA_DIR, "arv-fake-camera.xml", NULL);
 
 	if (!g_file_get_contents (filename, &fake_camera->priv->genicam_xml, &fake_camera->priv->genicam_xml_size, &error)) {
-		arv_warning_device ("Failed to load genicam file '%s': %s", error != NULL ? error->message : "Unknown reason");
+		arv_warning_device ("Failed to load genicam file '%s': %s",
+				    filename, error != NULL ? error->message : "Unknown reason");
 		g_clear_error (&error);
 		fake_camera->priv->genicam_xml = NULL;
 		fake_camera->priv->genicam_xml_size = 0;
@@ -815,10 +974,10 @@ arv_fake_camera_new (const char *serial_number)
 static void
 arv_fake_camera_init (ArvFakeCamera *fake_camera)
 {
-	fake_camera->priv = G_TYPE_INSTANCE_GET_PRIVATE (fake_camera, ARV_TYPE_FAKE_CAMERA, ArvFakeCameraPrivate);
+	fake_camera->priv = arv_fake_camera_get_instance_private (fake_camera);
 
 	fake_camera->priv->trigger_frequency = 25.0;
-	fake_camera->priv->frame_id = 65000; /* Trigger circular counter bugs sooner */
+	fake_camera->priv->frame_id = 65400; /* Trigger circular counter bugs sooner */
 }
 
 static void
@@ -830,7 +989,7 @@ arv_fake_camera_finalize (GObject *object)
 	g_clear_pointer (&fake_camera->priv->memory, g_free);
 	g_clear_pointer (&fake_camera->priv->genicam_xml, g_free);
 
-	parent_class->finalize (object);
+	G_OBJECT_CLASS (arv_fake_camera_parent_class)->finalize (object);
 }
 
 static void
@@ -838,17 +997,11 @@ arv_fake_camera_class_init (ArvFakeCameraClass *fake_camera_class)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS (fake_camera_class);
 
-#if !GLIB_CHECK_VERSION(2,38,0)
-	g_type_class_add_private (fake_camera_class, sizeof (ArvFakeCameraPrivate));
-#endif
-
-	parent_class = g_type_class_peek_parent (fake_camera_class);
-
 	object_class->finalize = arv_fake_camera_finalize;
 }
 
-#if !GLIB_CHECK_VERSION(2,38,0)
-G_DEFINE_TYPE (ArvFakeCamera, arv_fake_camera, G_TYPE_OBJECT)
-#else
-G_DEFINE_TYPE_WITH_CODE (ArvFakeCamera, arv_fake_camera, G_TYPE_OBJECT, G_ADD_PRIVATE (ArvFakeCamera))
-#endif
+static __attribute__((destructor)) void
+module_exit (void)
+{
+	arv_set_fake_camera_genicam_filename (NULL);
+}

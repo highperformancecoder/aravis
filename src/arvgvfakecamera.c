@@ -23,8 +23,8 @@
 #include <arvgvfakecamera.h>
 #include <arvfakecamera.h>
 #include <arvbufferprivate.h>
-#include <arvgvcp.h>
-#include <arvgvsp.h>
+#include <arvgvcpprivate.h>
+#include <arvgvspprivate.h>
 #include <arvmisc.h>
 #include <net/if.h>
 #include <ifaddrs.h>
@@ -55,9 +55,7 @@ enum
   PROP_CM_DOMAIN
 };
 
-static GObjectClass *parent_class = NULL;
-
-struct _ArvGvFakeCameraPrivate {
+typedef struct {
 	char *interface_name;
 	char *serial_number;
 	char *genicam_filename;
@@ -80,7 +78,19 @@ struct _ArvGvFakeCameraPrivate {
 	gboolean cancel;
 
 	double gvsp_lost_packet_ratio;
+} ArvGvFakeCameraPrivate;
+
+struct _ArvGvFakeCamera {
+	GObject	object;
+
+	ArvGvFakeCameraPrivate *priv;
 };
+
+struct _ArvGvFakeCameraClass {
+	GObjectClass parent_class;
+};
+
+G_DEFINE_TYPE_WITH_CODE (ArvGvFakeCamera, arv_gv_fake_camera, G_TYPE_OBJECT, G_ADD_PRIVATE (ArvGvFakeCamera))
 
 static gboolean
 _g_inet_socket_address_is_equal (GInetSocketAddress *a, GInetSocketAddress *b)
@@ -255,13 +265,11 @@ _thread (void *user_data)
 
 	do {
 		guint64 next_timestamp_us;
-		guint64 sleep_time_us;
 
 		if (is_streaming) {
-			sleep_time_us = arv_fake_camera_get_sleep_time_for_next_frame (gv_fake_camera->priv->camera, &next_timestamp_us);
+			arv_fake_camera_get_sleep_time_for_next_frame (gv_fake_camera->priv->camera, &next_timestamp_us);
 		} else {
-			sleep_time_us = 100000;
-			next_timestamp_us = g_get_real_time () + sleep_time_us;
+			next_timestamp_us = g_get_real_time () + 100000;
 		}
 
 		do {
@@ -329,7 +337,7 @@ _thread (void *user_data)
 
 			arv_fake_camera_fill_buffer (gv_fake_camera->priv->camera, image_buffer, &gv_packet_size);
 
-			arv_debug_stream_thread ("[GvFakeCamera::thread] Send frame %d", image_buffer->priv->frame_id);
+			arv_debug_stream_thread ("[GvFakeCamera::thread] Send frame %" G_GUINT64_FORMAT, image_buffer->priv->frame_id);
 
 			block_id = 0;
 
@@ -346,11 +354,11 @@ _thread (void *user_data)
 				g_socket_send_to (gv_fake_camera->priv->gvsp_socket, stream_address,
 						  packet_buffer, packet_size, NULL, &error);
 			else
-				arv_debug_stream_thread ("Drop GVSP leader packet frame:%u", image_buffer->priv->frame_id);
+				arv_debug_stream_thread ("Drop GVSP leader packet frame: %" G_GUINT64_FORMAT, image_buffer->priv->frame_id);
 
 			if (error != NULL) {
-				arv_warning_stream_thread ("[GvFakeCamera::thread] Failed to send leader for frame %d: %s",
-							   image_buffer->priv->frame_id, error->message);
+				arv_warning_stream_thread ("[GvFakeCamera::thread] Failed to send leader for frame %" G_GUINT64_FORMAT
+							   ": %s", image_buffer->priv->frame_id, error->message);
 				g_clear_error (&error);
 			}
 
@@ -372,13 +380,13 @@ _thread (void *user_data)
 					g_socket_send_to (gv_fake_camera->priv->gvsp_socket, stream_address,
 							  packet_buffer, packet_size, NULL, &error);
 				else
-					arv_debug_stream_thread ("Drop GVSP data packet frame:%d, block:%u", image_buffer->priv->frame_id, block_id);
+					arv_debug_stream_thread ("Drop GVSP data packet frame:%" G_GUINT64_FORMAT
+								 ", block:%u", image_buffer->priv->frame_id, block_id);
 
 				if (error != NULL) {
-					arv_debug_stream_thread ("[GvFakeCamera::thread] Failed to send frame block %d for frame: %s",
-								 block_id,
-								 image_buffer->priv->frame_id,
-								 error->message);
+					arv_debug_stream_thread ("[GvFakeCamera::thread] Failed to send frame block %d for frame"
+								 " %" G_GUINT64_FORMAT ": %s",
+								 block_id, image_buffer->priv->frame_id, error->message);
 					g_clear_error (&error);
 				}
 
@@ -394,12 +402,12 @@ _thread (void *user_data)
 				g_socket_send_to (gv_fake_camera->priv->gvsp_socket, stream_address,
 						  packet_buffer, packet_size, NULL, &error);
 			else
-				arv_debug_stream_thread ("Drop GVSP trailer packet frame:%d", image_buffer->priv->frame_id);
+				arv_debug_stream_thread ("Drop GVSP trailer packet frame: %" G_GUINT64_FORMAT,
+							 image_buffer->priv->frame_id);
 
 			if (error != NULL) {
-				arv_debug_stream_thread ("[GvFakeCamera::thread] Failed to send trailer for frame %d: %s",
-							 image_buffer->priv->frame_id,
-							 error->message);
+				arv_debug_stream_thread ("[GvFakeCamera::thread] Failed to send trailer for frame %" G_GUINT64_FORMAT
+							 ": %s", image_buffer->priv->frame_id, error->message);
 				g_clear_error (&error);
 			}
 
@@ -692,7 +700,7 @@ arv_gv_fake_camera_is_running (ArvGvFakeCamera *gv_fake_camera)
 static void
 arv_gv_fake_camera_init (ArvGvFakeCamera *gv_fake_camera)
 {
-	gv_fake_camera->priv = G_TYPE_INSTANCE_GET_PRIVATE (gv_fake_camera, ARV_TYPE_GV_FAKE_CAMERA, ArvGvFakeCameraPrivate);
+	gv_fake_camera->priv = arv_gv_fake_camera_get_instance_private (gv_fake_camera);
 }
 
 static void
@@ -700,7 +708,7 @@ _constructed (GObject *gobject)
 {
 	ArvGvFakeCamera *gv_fake_camera = ARV_GV_FAKE_CAMERA (gobject);
 
-	parent_class->constructed (gobject);
+	G_OBJECT_CLASS (arv_gv_fake_camera_parent_class)->constructed (gobject);
 
 	gv_fake_camera->priv->camera = arv_fake_camera_new_full (gv_fake_camera->priv->serial_number, gv_fake_camera->priv->genicam_filename);
 	gv_fake_camera->priv->is_running = arv_gv_fake_camera_start (gv_fake_camera);
@@ -721,19 +729,13 @@ _finalize (GObject *object)
 	g_clear_pointer (&gv_fake_camera->priv->serial_number, g_free);
 	g_clear_pointer (&gv_fake_camera->priv->genicam_filename, g_free);
 
-	parent_class->finalize (object);
+	G_OBJECT_CLASS (arv_gv_fake_camera_parent_class)->finalize (object);
 }
 
 static void
 arv_gv_fake_camera_class_init (ArvGvFakeCameraClass *this_class)
 {
 	GObjectClass *object_class = G_OBJECT_CLASS (this_class);
-
-#if !GLIB_CHECK_VERSION(2,38,0)
-	g_type_class_add_private (this_class, sizeof (ArvGvFakeCameraPrivate));
-#endif
-
-	parent_class = g_type_class_peek_parent (this_class);
 
 	object_class->set_property = _set_property;
 	object_class->constructed = _constructed;
@@ -776,9 +778,3 @@ arv_gv_fake_camera_class_init (ArvGvFakeCameraClass *this_class)
 							      G_PARAM_STATIC_NAME | G_PARAM_STATIC_NICK |
 							      G_PARAM_STATIC_BLURB));
 }
-
-#if !GLIB_CHECK_VERSION(2,38,0)
-G_DEFINE_TYPE (ArvGvFakeCamera, arv_gv_fake_camera, G_TYPE_OBJECT)
-#else
-G_DEFINE_TYPE_WITH_CODE (ArvGvFakeCamera, arv_gv_fake_camera, G_TYPE_OBJECT, G_ADD_PRIVATE (ArvGvFakeCamera))
-#endif

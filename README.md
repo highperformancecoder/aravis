@@ -1,7 +1,7 @@
 [![Build Status](https://travis-ci.org/AravisProject/aravis.svg?branch=master)](https://travis-ci.org/AravisProject/aravis)
 [![Codacy Badge](https://api.codacy.com/project/badge/Grade/fa7d9c88e5594d709ab44e8bad01a569)](https://www.codacy.com/app/EmmanuelP/aravis?utm_source=github.com&amp;utm_medium=referral&amp;utm_content=AravisProject/aravis&amp;utm_campaign=Badge_Grade)
 
-# ![](viewer/icons/gnome/256x256/apps/aravis.png) Aravis
+# ![](viewer/icons/gnome/128x128/apps/aravis-0.8.png)
 
 ### What is Aravis ?
 
@@ -14,15 +14,7 @@ Aravis is released under the LGPL v2+.
 
 ### Installing Aravis
 
-Until the 0.6.x stable series, Aravis build system was based on Autotools. The recommended way to get the sources is to download the release tarballs from http://ftp.gnome.org/pub/GNOME/sources/aravis, and then compile it using the following commands:
-
-```
-./configure
-make
-make install
-```
-
-The current unstable serie of Aravis uses meson build system ( http://mesonbuild.com/ ). Release tarballs can be found at the same usual place. You can build and install Aravis like [any other meson project](http://mesonbuild.com/Quick-guide.html#compiling-a-meson-project):
+Aravis uses the meson build system ( http://mesonbuild.com/ ). After you have downloaded the latest release from [http://ftp.gnome.org/pub/GNOME/sources/aravis](http://ftp.gnome.org/pub/GNOME/sources/aravis), you can build and install Aravis like [any other meson project](http://mesonbuild.com/Quick-guide.html#compiling-a-meson-project):
 
 ```
 meson build
@@ -86,7 +78,7 @@ The GStreamer plugin depends on GStreamer1 in addition to the Aravis library dep
 
 The simple viewer depends on GStreamer1, Gtk+3, libnotify and the Aravis library dependencies.
 
-The required versions are specified in the [configure.ac](https://github.com/AravisProject/aravis/blob/master/configure.ac#L67) file in Aravis sources.
+The required versions are specified in the [meson.build](https://github.com/AravisProject/aravis/blob/master/meson.build) file in Aravis sources.
 
 It is perfectly possible to only build the library, reducing the dependencies to the bare minimum.
 
@@ -113,19 +105,53 @@ The is a small helper script that run the same tests under valgrind memmory chec
 All the code is not covered yet by the tests. Code coverage can be obtained using:
 
 ```
+meson configure -Db_coverage=true
 ninja coverage
 ```
 
-The report is published in `build/meson-logs/coveragereport/index.html`. Help on code coverage improvment is welcomed.
+The report is published in `build/meson-logs/coveragereport/index.html`. Help on code coverage improvement is welcome.
+
+### Programming examples
+
+While most of the API is documented, Aravis documentation lacks some good tutorial about the many features if offers. But a good resource is the
+tests directory inside Aravis sources, where you will find a numbers of small samples showing different key features.
+
+### Porting to Aravis 0.8
+
+Aravis 0.8 has seen a major rewrite of how communication errors are handled. Instead of relying on a status API, each function that can fail
+has an additional error parameter now. This is the standard way of handling error in the glib ecosytem. The nice side effect is now errors
+throw exceptions in bindings where the language support them (rust, python, javascript). 
+
+A quick port from the older series to 0.8 series is just a matter of adding a NULL parameter to most of the modified functions. But you are
+advised to take this opportunity to correctly handle errors.
+
+There is a page explaining Glib errors and how to manage them in the [Glib documentation](https://developer.gnome.org/glib/stable/glib-Error-Reporting.html).
+
+During the camera configuration, in C language it can be somehow cumbersome to check for errors at each function call. A convenient
+way to deal with this issue is the following construction:
+
+```
+GError **error = NULL;
+
+if (!error) arv_camera_... (..., &error);
+if (!error) arv_camera_... (..., &error);
+if (!error) arv_camera_... (..., &error);
+if (!error) arv_camera_... (..., &error);
+
+if (error) {
+	handle error here;
+	g_clear_error (&error);
+}
+```
 
 ### Downloads
 
-* 0.6.x stable releases: http://ftp.gnome.org/pub/GNOME/sources/aravis/0.6/
+* 0.8.x stable releases: http://ftp.gnome.org/pub/GNOME/sources/aravis/0.8/
 
 ### Links
 
+* Forum: https://aravis-project.discourse.group
 * Github repository: https://github.com/AravisProject/aravis
-* Mailing list: aravis@freelists.org ( http://www.freelists.org/list/aravis )
-* Aravis 0.6 documentation: https://aravisproject.github.io/docs/aravis-0.6/
-* Blog: http://blogs.gnome.org/emmanuel/category/aravis/
+* Release notes: https://github.com/AravisProject/aravis/blob/master/NEWS.md
+* Aravis 0.8 documentation: https://aravisproject.github.io/docs/aravis-0.8/
 * Genicam standard : http://www.genicam.org
